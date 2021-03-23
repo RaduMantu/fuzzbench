@@ -15,24 +15,26 @@
 ARG parent_image
 FROM $parent_image
 
+# prefer using bash in stead of sh
+SHELL ["/bin/bash", "-c"]
+
 # Install dependencies
 # NOTE: on systems newer than Ubuntu 16.04, you may also need libgcc-7-dev to
 #       make clang 3.8.0 work
-RUN apt update  -y                           \
- && apt install -y                           \
-    libssl-dev      `# fuzzer runtime`       \
-    make gcc g++    `# fuzzer compilation`   \
-    wget xz-utils   `# clang 3.8.0 fetching`
+RUN apt update  -y \
+ && apt install -y \
+    libssl-dev make gcc g++ wget xz-utils
 
 # Download latest SIVO and compile (fuzzer_lib included)
 # NOTE: sourced PATH will not persist past this RUN statement
 # NOTE: SivoFuzzer/Sivo-fuzzer/llvm/pass-*.o must NOT be moved
 RUN git clone https://github.com/ivicanikolicsg/SivoFuzzer.git \
- && cd SivoFuzzer                                              \
- && source setup.sh                                            \
- && cd Sivo-fuzzer                                             \
- && make -j $(nproc)                                           \
- && cd fuzzbench_driver                                        \
- && clang++ -c np_driver.cpp                                   \
+ && cd SivoFuzzer \
+ && set -x \
+ && . ./setup.sh \
+ && cd Sivo-fuzzer \
+ && make -j $(nproc) \
+ && cd fuzzbench_driver \
+ && clang++ -c np_driver.cpp \
  && ar rc np_driver.a np_driver.o
 

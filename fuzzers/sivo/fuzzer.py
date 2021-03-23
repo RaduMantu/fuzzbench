@@ -18,17 +18,16 @@ import shutil
 import subprocess
 import tempfile
 import stat
-import re
 import inspect
+import pathlib
 
 from datetime import datetime
-from fuzzers import util
-
+from fuzzers import utils
 
 # ANSI escape codes for colored output
 ANSI_RED    = '\033[31m'
 ANSI_GREEN  = '\033[32m'
-ANSI_YELLOW = '\033[33m' 
+ANSI_YELLOW = '\033[33m'
 ANSI_BLUE   = '\033[34m'
 ANSI_CLR    = '\033[0m'
 
@@ -41,12 +40,12 @@ def log_msg(msg):
     """
     # prepend timestamp and calling function to message
     print('[%s] %s%s%s: %s' % \
-        datetime.now().strftime('%H:%M:%S'),
-        ANSI_BLUE, inspect.stack()[1][3], ANSI_CLR,
-        msg)
+        (datetime.now().strftime('%H:%M:%S'),
+         ANSI_BLUE, inspect.stack()[1][3], ANSI_CLR,
+         msg))
 
 
-def individual_build(cc, cxx, out, sfx):
+def individual_build(cc, cxx, sfx, eef=False):
     """Build benchmark with specific compiler.
 
     Our compilation process requires generating two sets of binaries. The
@@ -61,8 +60,8 @@ def individual_build(cc, cxx, out, sfx):
     Args:
         cc:  C compiler to use.
         cxx  C++ compiler to use.
-        out: Final destination directory.
         sfx: Suffix added to executables.
+        eef: True if expecting extra files (llvm-*-BIN) from compilation.
     """
     log_msg('building with CC=%s%s%s and CXX=%s%s%s' % \
         (ANSI_YELLOW, cc, ANSI_CLR, ANSI_YELLOW, cxx, ANSI_CLR,))
@@ -85,60 +84,73 @@ def individual_build(cc, cxx, out, sfx):
     # start build process (FUZZER_LIB set previously in build())
     utils.build_benchmark()
     log_msg('%sutils.build_benchmark()%s finished' % \
-        (ANSI_YELLOW, ANSI_CLR))    
+        (ANSI_YELLOW, ANSI_CLR))
 
     # define a filter function for executable files in new OUT (not portable)
     ugo_x   = stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
-    is_exec = lambda x: os.stat('%s/%s' % (tmp_dir.name, x)).st_mode & ugo_x
+    is_exec = lambda x: os.path.isfile('%s/%s' % (tmp_dir.name, x)) and \
+                 os.stat('%s/%s' % (tmp_dir.name, x)).st_mode & ugo_x != 0
 
     # get list of executable files (should not be empty)
     exec_files = list(filter(is_exec, os.listdir(tmp_dir.name)))
     log_msg('scanned for %sexec%s files; %s%d%s found' % \
         (ANSI_YELLOW, ANSI_CLR, ANSI_YELLOW, len(exec_files), ANSI_CLR))
+    for exec_file in exec_files:
+        log_msg('\t> %s' % exec_file);
 
-    # get list of extra info files (could be empty)
-    pattern = re.compile("llvm-(cfg|ifs|switches)-.*")
-    extra_files = list(filter(pattern.match, os.listdir(tmp_dir.name)))
-    log_msg('scanned for %sextra%s files; %s%d%s found' % \
-        (ANSI_YELLOW, ANSI_CLR, ANSI_YELLOW, len(exec_files), ANSI_CLR))
+    # make sure that extra files exist (if expected)
+    # NOTE: even if no switches (for example) in target program, we still need
+    #       the file (even if empty)
+    if eef:
+        extra_files = [ '%s/%s' % (tmp_dir.name, it) for it in 
+            ['llvm-cfg-common', 'llvm-ifs-common', 'llvm-switches-common'] ]
+        for extra_file in extra_files:
+            pathlib.Path(extra_file).touch()
 
     # considering each binary for post-processing
     for binary in exec_files:
-        # make renamed copies of extra info files
-        for extra in extra_files:
-            shutil.copyfile('%s/%s' % (tmp_dir.name, extra),
-                '%s/llvm-%s-%s' % (tmp_dir.name, extra.split('-')[1], binary))
+        # make renamed copies of extra info files (if expected)
+        if eef:
+            for extra_file in extra_files:
+                shutil.copyfile(extra_file, '%s%s' % (extra_file[:-6], binary))
 
         # add suffix to binary name
         os.rename('%s/%s' % (tmp_dir.name, binary),
             '%s/%s%s' % (tmp_dir.name, binary, sfx))
 
-    # remove original extra info files
-    for extra in extra_files:
-        os.remove('%s/%s', (tmp_dir.name, extra))
+    # remove original extra info files (if expected)
+    if eef:
+        for extra_file in extra_files:
+            os.remove(extra_file)
 
     log_msg('post-processing complete')
 
-    # copy contents of intermediary dir to original OUT    
+    # copy contents of intermediary dir to original OUT
+    # exception may be raised for duplicate seed/ directory
     for f in os.listdir(tmp_dir.name):
-        shutil.move('%s/%s' % (tmp_dir.name, f), '%s' % orig_out)
+        try:
+            shutil.move('%s/%s' % (tmp_dir.name, f), '%s' % orig_out)
+        except shutil.Error:
+            pass
 
     log_msg('all files moved from %s%s%s to %s%s%s' % \
-        ANSI_YELLOW, tmp_dir.name, ANSI_CLR, ANSI_YELLOW, orig_out, ANSI_CLR)
+        (ANSI_YELLOW, tmp_dir.name, ANSI_CLR,
+         ANSI_YELLOW, orig_out, ANSI_CLR))
 
     # explicitly clean up intermediary output directory
     tmp_dir.cleanup()
     log_msg('cleaned up intermediary output directory')
 
     # restore the original OUT environment variable
-    os.environ['OUT']
+    os.environ['OUT'] = orig_out
 
 
 def build():
     """Build benchmark."""
     # important directories
-    clang_dir = '/SivoFuzzer/clang_llvm-3.8.0/bin'
-    sivo_dir  = '/SivoFuzzer/Sivo-fuzzer'
+    src       = os.environ['SRC']
+    clang_dir = '%s/SivoFuzzer/clang_llvm-3.8.0/bin' % src
+    sivo_dir  = '%s/SivoFuzzer/Sivo-fuzzer' % src
 
     # update PATH for easier access to sivo-clang and correct usage of
     # clang-3.8.0; set up the path to our fuzzer_lib
@@ -146,8 +158,8 @@ def build():
     os.environ['FUZZER_LIB'] = '%s/fuzzbench_driver/np_driver.a' % sivo_dir
 
     # perform both individual builds
-    individual_build('sivo-clang1', 'sivo-clang1++', os.environ['OUT'], '-1')
-    individual_build('sivo-clang2', 'sivo-clang2++', os.environ['OUT'], '-2')
+    individual_build('sivo-clang1', 'sivo-clang1++', '-1', False)
+    individual_build('sivo-clang2', 'sivo-clang2++', '-2', True)
 
     # place sivo together with the built benchmarks
     shutil.copy('%s/sivo' % sivo_dir, os.environ['OUT'])
@@ -155,5 +167,8 @@ def build():
 
 def fuzz(input_corpus, output_corpus, target_binary):
     """Run fuzzer."""
-    pass
+    print('>>> I don\'t want to run yet')
+    print('\tinput_corpus: %s' % input_corpus)
+    print('\toutput_corpus: %s' % output_corpus)
+    print('\ttarget_binary: %s' % target_binary)
 
