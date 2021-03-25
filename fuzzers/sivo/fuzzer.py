@@ -25,11 +25,11 @@ from datetime import datetime
 from fuzzers import utils
 
 # ANSI escape codes for colored output
-ANSI_RED    = '\033[31m'
-ANSI_GREEN  = '\033[32m'
+ANSI_RED = '\033[31m'
+ANSI_GREEN = '\033[32m'
 ANSI_YELLOW = '\033[33m'
-ANSI_BLUE   = '\033[34m'
-ANSI_CLR    = '\033[0m'
+ANSI_BLUE = '\033[34m'
+ANSI_CLR = '\033[0m'
 
 
 def log_msg(msg):
@@ -45,7 +45,7 @@ def log_msg(msg):
          msg))
 
 
-def individual_build(cc, cxx, sfx, eef=False):
+def individual_build(_cc, cxx, sfx, eef=False):
     """Build benchmark with specific compiler.
 
     Our compilation process requires generating two sets of binaries. The
@@ -58,13 +58,13 @@ def individual_build(cc, cxx, sfx, eef=False):
     same directory when fuzzed.
 
     Args:
-        cc:  C compiler to use.
-        cxx  C++ compiler to use.
+        _cc: C compiler to use.
+        cxx: C++ compiler to use.
         sfx: Suffix added to executables.
         eef: True if expecting extra files (llvm-*-BIN) from compilation.
     """
     log_msg('building with CC=%s%s%s and CXX=%s%s%s' % \
-        (ANSI_YELLOW, cc, ANSI_CLR,
+        (ANSI_YELLOW, _cc, ANSI_CLR,
          ANSI_YELLOW, cxx, ANSI_CLR,))
 
     # back up the original output directory
@@ -76,11 +76,11 @@ def individual_build(cc, cxx, sfx, eef=False):
         (ANSI_YELLOW, tmp_dir.name, ANSI_CLR))
 
     # set up environment variables
-    os.environ['OUT']                   = tmp_dir.name
-    os.environ['CC']                    = cc
-    os.environ['CXX']                   = cxx
+    os.environ['OUT'] = tmp_dir.name
+    os.environ['CC'] = _cc
+    os.environ['CXX'] = cxx
     os.environ['__BINARY_COMPILE_NAME'] = 'common'
-    os.environ['__RUN_PATH']            = tmp_dir.name
+    os.environ['__RUN_PATH'] = tmp_dir.name
 
     # start build process (FUZZER_LIB set previously in build())
     utils.build_benchmark()
@@ -88,7 +88,7 @@ def individual_build(cc, cxx, sfx, eef=False):
         (ANSI_YELLOW, ANSI_CLR))
 
     # define a filter function for executable files in new OUT (not portable)
-    ugo_x   = stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
+    ugo_x = stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
     is_exec = lambda x: os.path.isfile('%s/%s' % (tmp_dir.name, x)) and \
                  os.stat('%s/%s' % (tmp_dir.name, x)).st_mode & ugo_x != 0
 
@@ -97,14 +97,16 @@ def individual_build(cc, cxx, sfx, eef=False):
     log_msg('scanned for executable files; %s%d%s found:' % \
         (ANSI_YELLOW, len(exec_files), ANSI_CLR))
     for exec_file in exec_files:
-        log_msg('\t> %s' % exec_file);
+        log_msg('\t> %s' % exec_file)
 
     # make sure that extra files exist (if expected)
     # NOTE: even if no switches (for example) in target program, we still need
     #       the file (even if empty)
     if eef:
-        extra_files = [ '%s/%s' % (tmp_dir.name, it) for it in 
-            ['llvm-cfg-common', 'llvm-ifs-common', 'llvm-switches-common'] ]
+        extra_files = [
+            '%s/%s' % (tmp_dir.name, it) for it in
+            ['llvm-cfg-common', 'llvm-ifs-common', 'llvm-switches-common']
+        ]
         for extra_file in extra_files:
             pathlib.Path(extra_file).touch()
 
@@ -117,7 +119,7 @@ def individual_build(cc, cxx, sfx, eef=False):
 
         # add suffix to binary name
         os.rename('%s/%s' % (tmp_dir.name, binary),
-            '%s/%s%s' % (tmp_dir.name, binary, sfx))
+                  '%s/%s%s' % (tmp_dir.name, binary, sfx))
 
         # run_fuzzer() will check existance of binary before calling our fuzz().
         # since we append -1 and -2 to the binaries that we generate, we need to
@@ -133,9 +135,9 @@ def individual_build(cc, cxx, sfx, eef=False):
 
     # copy contents of intermediary dir to original OUT
     # exception may be raised for duplicate seed/ directory
-    for f in os.listdir(tmp_dir.name):
+    for f_it in os.listdir(tmp_dir.name):
         try:
-            shutil.move('%s/%s' % (tmp_dir.name, f), '%s' % orig_out)
+            shutil.move('%s/%s' % (tmp_dir.name, f_it), '%s' % orig_out)
         except shutil.Error:
             pass
 
@@ -154,9 +156,9 @@ def individual_build(cc, cxx, sfx, eef=False):
 def build():
     """Build benchmark."""
     # important directories
-    src_dir   = os.environ['SRC']
+    src_dir = os.environ['SRC']
     clang_dir = '%s/SivoFuzzer/clang_llvm-3.8.0/bin' % src_dir
-    sivo_dir  = '%s/SivoFuzzer/Sivo-fuzzer' % src_dir
+    sivo_dir = '%s/SivoFuzzer/Sivo-fuzzer' % src_dir
 
     # update PATH for easier access to sivo-clang and correct usage of
     # clang-3.8.0; set up the path to our fuzzer_lib
@@ -171,7 +173,7 @@ def build():
     # copy clang/lib for target runtime requirements (e.g.: libc++abi)
     shutil.copy('%s/sivo' % sivo_dir, os.environ['OUT'])
     shutil.copytree('%s/SivoFuzzer/clang_llvm-3.8.0/lib' % src_dir,
-        '%s/clang_lib' % os.environ['OUT'])
+                    '%s/clang_lib' % os.environ['OUT'])
 
 
 def run_sivo_fuzz(input_corpus,
@@ -198,7 +200,7 @@ def run_sivo_fuzz(input_corpus,
     target_binary = os.path.abspath(target_binary)
     bin1_exists = os.path.isfile('%s-1' % target_binary)
     bin2_exists = os.path.isfile('%s-2' % target_binary)
-    
+
     log_msg('%s%s-1%s exists: %s%s%s' % \
         (ANSI_YELLOW, target_binary, ANSI_CLR,
          ANSI_GREEN if bin1_exists else ANSI_RED, bin1_exists, ANSI_CLR))
@@ -207,7 +209,7 @@ def run_sivo_fuzz(input_corpus,
          ANSI_GREEN if bin2_exists else ANSI_RED, bin1_exists, ANSI_CLR))
 
     if not bin1_exists or not bin2_exists:
-        return
+        raise Exception('At least one of the two binaries are missing')
 
     # create directory structure
     init_seeds_dir = '%s/init_seeds' % output_corpus
@@ -218,7 +220,7 @@ def run_sivo_fuzz(input_corpus,
         (ANSI_YELLOW, init_seeds_dir, input_corpus, ANSI_CLR))
 
     # compose fuzzer command
-    comm = [ './sivo', output_corpus, target_binary, '@@' ]
+    comm = ['./sivo', output_corpus, target_binary, '@@']
     log_msg('Running command: %s%s%s' % \
         (ANSI_YELLOW, ' '.join(comm), ANSI_CLR))
 
@@ -228,11 +230,12 @@ def run_sivo_fuzz(input_corpus,
 
     # start fuzzer
     output_stream = subprocess.DEVNULL if hide_output else None
-    subprocess.check_call(comm, stdout=output_stream, stderr=output_stream,
-        env=env)
+    subprocess.check_call(comm,
+                          stdout=output_stream,
+                          stderr=output_stream,
+                          env=env)
 
 
 def fuzz(input_corpus, output_corpus, target_binary):
     """Run sivo on target"""
     run_sivo_fuzz(input_corpus, output_corpus, target_binary)
-
