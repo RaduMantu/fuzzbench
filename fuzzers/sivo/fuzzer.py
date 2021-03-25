@@ -64,7 +64,8 @@ def individual_build(cc, cxx, sfx, eef=False):
         eef: True if expecting extra files (llvm-*-BIN) from compilation.
     """
     log_msg('building with CC=%s%s%s and CXX=%s%s%s' % \
-        (ANSI_YELLOW, cc, ANSI_CLR, ANSI_YELLOW, cxx, ANSI_CLR,))
+        (ANSI_YELLOW, cc, ANSI_CLR,
+         ANSI_YELLOW, cxx, ANSI_CLR,))
 
     # back up the original output directory
     orig_out = os.environ['OUT']
@@ -93,8 +94,8 @@ def individual_build(cc, cxx, sfx, eef=False):
 
     # get list of executable files (should not be empty)
     exec_files = list(filter(is_exec, os.listdir(tmp_dir.name)))
-    log_msg('scanned for %sexec%s files; %s%d%s found' % \
-        (ANSI_YELLOW, ANSI_CLR, ANSI_YELLOW, len(exec_files), ANSI_CLR))
+    log_msg('scanned for executable files; %s%d%s found:' % \
+        (ANSI_YELLOW, len(exec_files), ANSI_CLR))
     for exec_file in exec_files:
         log_msg('\t> %s' % exec_file);
 
@@ -117,6 +118,11 @@ def individual_build(cc, cxx, sfx, eef=False):
         # add suffix to binary name
         os.rename('%s/%s' % (tmp_dir.name, binary),
             '%s/%s%s' % (tmp_dir.name, binary, sfx))
+
+        # run_fuzzer() will check existance of binary before calling our fuzz().
+        # since we append -1 and -2 to the binaries that we generate, we need to
+        # create a dummy binary.
+        pathlib.Path('%s/%s' % (tmp_dir.name, binary)).touch()
 
     # remove original extra info files (if expected)
     if eef:
@@ -148,9 +154,9 @@ def individual_build(cc, cxx, sfx, eef=False):
 def build():
     """Build benchmark."""
     # important directories
-    src       = os.environ['SRC']
-    clang_dir = '%s/SivoFuzzer/clang_llvm-3.8.0/bin' % src
-    sivo_dir  = '%s/SivoFuzzer/Sivo-fuzzer' % src
+    src_dir   = os.environ['SRC']
+    clang_dir = '%s/SivoFuzzer/clang_llvm-3.8.0/bin' % src_dir
+    sivo_dir  = '%s/SivoFuzzer/Sivo-fuzzer' % src_dir
 
     # update PATH for easier access to sivo-clang and correct usage of
     # clang-3.8.0; set up the path to our fuzzer_lib
@@ -162,13 +168,71 @@ def build():
     individual_build('sivo-clang2', 'sivo-clang2++', '-2', True)
 
     # place sivo together with the built benchmarks
+    # copy clang/lib for target runtime requirements (e.g.: libc++abi)
     shutil.copy('%s/sivo' % sivo_dir, os.environ['OUT'])
+    shutil.copytree('%s/SivoFuzzer/clang_llvm-3.8.0/lib' % src_dir,
+        '%s/clang_lib' % os.environ['OUT'])
+
+
+def run_sivo_fuzz(input_corpus,
+                  output_corpus,
+                  target_binary,
+                  hide_output=False):
+    """Start sivo instance.
+
+    Sivo requires a certain corpus structure. If we specify CORPUS as a cli
+    argument, it will expect to find the seed values at this path:
+        CORPUS/init_seeds/queue/
+    After successfully starting, it will create a new subdirectory where it
+    will store the generated testcases, grouped by different criteria. When
+    evaluating its output, the go-to directory will be:
+        CORPUS/outputs/queue/
+
+    Args:
+        input_corpus:  Seed testcases directory.
+        output_corpus: Fuzzer runtime workspace directory.
+        target_binary: Path to fuzzed binary.
+        hide_output:   If True, redirect fuzzer stats to /dev/null.
+    """
+    # Check if binaries exist
+    target_binary = os.path.abspath(target_binary)
+    bin1_exists = os.path.isfile('%s-1' % target_binary)
+    bin2_exists = os.path.isfile('%s-2' % target_binary)
+    
+    log_msg('%s%s-1%s exists: %s%s%s' % \
+        (ANSI_YELLOW, target_binary, ANSI_CLR,
+         ANSI_GREEN if bin1_exists else ANSI_RED, bin1_exists, ANSI_CLR))
+    log_msg('%s%s-2%s exists: %s%s%s' % \
+        (ANSI_YELLOW, target_binary, ANSI_CLR,
+         ANSI_GREEN if bin2_exists else ANSI_RED, bin1_exists, ANSI_CLR))
+
+    if not bin1_exists or not bin2_exists:
+        return
+
+    # create directory structure
+    init_seeds_dir = '%s/init_seeds' % output_corpus
+    pathlib.Path(init_seeds_dir).mkdir(parents=True, exist_ok=True)
+    os.symlink(input_corpus, '%s/queue' % init_seeds_dir)
+
+    log_msg('Created %s%s/queue -> %s%s' % \
+        (ANSI_YELLOW, init_seeds_dir, input_corpus, ANSI_CLR))
+
+    # compose fuzzer command
+    comm = [ './sivo', output_corpus, target_binary, '@@' ]
+    log_msg('Running command: %s%s%s' % \
+        (ANSI_YELLOW, ' '.join(comm), ANSI_CLR))
+
+    # update LD_LIBRARY_PATH with clang_lib/ (may be needed by target)
+    env = dict(os.environ)
+    env['LD_LIBRARY_PATH'] = '%s/clang_lib' % os.environ['OUT']
+
+    # start fuzzer
+    output_stream = subprocess.DEVNULL if hide_output else None
+    subprocess.check_call(comm, stdout=output_stream, stderr=output_stream,
+        env=env)
 
 
 def fuzz(input_corpus, output_corpus, target_binary):
-    """Run fuzzer."""
-    print('>>> I don\'t want to run yet')
-    print('\tinput_corpus: %s' % input_corpus)
-    print('\toutput_corpus: %s' % output_corpus)
-    print('\ttarget_binary: %s' % target_binary)
+    """Run sivo on target"""
+    run_sivo_fuzz(input_corpus, output_corpus, target_binary)
 
