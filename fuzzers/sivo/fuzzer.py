@@ -41,8 +41,7 @@ def log_msg(msg):
     # prepend timestamp and calling function to message
     print('[%s] %s%s%s: %s' % \
         (datetime.now().strftime('%H:%M:%S'),
-         ANSI_BLUE, inspect.stack()[1][3], ANSI_CLR,
-         msg))
+         ANSI_BLUE, inspect.stack()[1][3], ANSI_CLR, msg))
 
 
 def individual_build(_cc, cxx, sfx, eef=False):
@@ -66,6 +65,10 @@ def individual_build(_cc, cxx, sfx, eef=False):
     log_msg('building with CC=%s%s%s and CXX=%s%s%s' % \
         (ANSI_YELLOW, _cc, ANSI_CLR,
          ANSI_YELLOW, cxx, ANSI_CLR,))
+    log_msg('CFLAGS=%s%s%s' % \
+        (ANSI_YELLOW, os.environ['CFLAGS'], ANSI_CLR))
+    log_msg('CXXFLAGS=%s%s%s' % \
+        (ANSI_YELLOW, os.environ['CXXFLAGS'], ANSI_CLR))
 
     # back up the original output directory
     orig_out = os.environ['OUT']
@@ -123,7 +126,7 @@ def individual_build(_cc, cxx, sfx, eef=False):
 
         # run_fuzzer() will check existance of binary before calling our fuzz().
         # since we append -1 and -2 to the binaries that we generate, we need to
-        # create a dummy binary.
+        # create a dummy binary
         pathlib.Path('%s/%s' % (tmp_dir.name, binary)).touch()
 
     # remove original extra info files (if expected)
@@ -154,25 +157,67 @@ def individual_build(_cc, cxx, sfx, eef=False):
 
 
 def build():
-    """Build benchmark."""
+    """Build benchmark.
+
+    Because we need to run the build script twice, any changes made to SRC the
+    first time around may produce an error the second time. For example, in
+    libpcap_fuzz_both, a diff patch is applied successfully the first time. But
+    when building the project again, the same diffpatch will fail and terminate
+    the process. Because of this, we need to save the contents of SRC in a
+    pristine state and revert the changes in between builds. Simplest way to do
+    this is by creating a recursive copy and replacing the original after the
+    first build. Simply changing SRC is discouraged due to possible hardcoded
+    '/src' paths in build scripts.
+
+    """
     # important directories
-    src_dir = os.environ['SRC']
-    clang_dir = '%s/SivoFuzzer/clang_llvm-3.8.0/bin' % src_dir
-    sivo_dir = '%s/SivoFuzzer/Sivo-fuzzer' % src_dir
+    clang_dir = '/SivoFuzzer/clang_llvm-3.8.0/bin'
+    lib_dir = '/SivoFuzzer/clang_llvm-3.8.0/lib'
+    sivo_dir = '/SivoFuzzer/Sivo-fuzzer'
+    fake_src = '%s_fake' % os.environ['SRC']
+
+    # this is needed in order to build jsoncpp_jsoncpp_fuzzer
+    utils.append_flags('CXXFLAGS', ['-std=c++11'])
+
+    # create copy of SRC
+    shutil.copytree(os.environ['SRC'], fake_src)
+    log_msg('created copy of %s%s%s as %s%s%s' % \
+        (ANSI_YELLOW, os.environ['SRC'], ANSI_CLR,
+         ANSI_YELLOW, fake_src, ANSI_CLR))
 
     # update PATH for easier access to sivo-clang and correct usage of
-    # clang-3.8.0; set up the path to our fuzzer_lib
+    # clang-3.8.0; set up the path to our fuzzer_lib; link to clag/lib/
+    # in case build scripts want to test working compiler
+    if 'LD_LIBRARY_PATH' not in os.environ:
+        os.environ['LD_LIBRARY_PATH'] = ''
+
     os.environ['PATH'] = '%s:%s:%s' % (clang_dir, sivo_dir, os.environ['PATH'])
     os.environ['FUZZER_LIB'] = '%s/fuzzbench_driver/np_driver.a' % sivo_dir
+    os.environ['LD_LIBRARY_PATH'] = '%s:%s' % \
+        (lib_dir, os.environ['LD_LIBRARY_PATH'])
+
+    # save CWD (container entry point) for later
+    cwd = os.getcwd()
+    log_msg('saved CWD=%s%s%s' % (ANSI_YELLOW, cwd, ANSI_CLR))
 
     # perform both individual builds
+    # replace original SRC with copy in between builds
     individual_build('sivo-clang1', 'sivo-clang1++', '-1', False)
+
+    # after replacement, we need to reset CWD; otherwise, both the log_msg()
+    # function and the subprocess module will cease to function properly
+    shutil.rmtree(os.environ['SRC'])
+    os.rename(fake_src, os.environ['SRC'])
+    os.chdir(cwd)
+    log_msg('SRC replaced with copy')
+    log_msg('restored CWD=%s%s%s from copy' % (ANSI_YELLOW, cwd, ANSI_CLR))
+
     individual_build('sivo-clang2', 'sivo-clang2++', '-2', True)
 
     # place sivo together with the built benchmarks
     # copy clang/lib for target runtime requirements (e.g.: libc++abi)
     shutil.copy('%s/sivo' % sivo_dir, os.environ['OUT'])
-    shutil.copytree('%s/SivoFuzzer/clang_llvm-3.8.0/lib' % src_dir,
+    shutil.copytree('/SivoFuzzer/clang_llvm-3.8.0/lib',
                     '%s/clang_lib' % os.environ['OUT'])
 
 
@@ -210,6 +255,13 @@ def run_sivo_fuzz(input_corpus,
 
     if not bin1_exists or not bin2_exists:
         raise Exception('At least one of the two binaries are missing')
+
+    # if no seed value, create random (sivo needs at least one)
+    if len(os.listdir(input_corpus)) == 0:
+        with open('%s/id:000000' % input_corpus, 'wb') as seed:
+            seed.write(os.urandom(512))
+        log_msg('Written %s512%s random bytes to %s%s/id:000000%s' % \
+            (ANSI_YELLOW, ANSI_CLR, ANSI_YELLOW, input_corpus, ANSI_CLR))
 
     # create directory structure
     init_seeds_dir = '%s/init_seeds' % output_corpus

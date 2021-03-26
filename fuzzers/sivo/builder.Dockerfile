@@ -28,10 +28,9 @@ RUN apt update  -y \
 # Download latest SIVO and compile (fuzzer_lib included)
 # NOTE: sourced PATH will not persist past this RUN statement
 # NOTE: SivoFuzzer/Sivo-fuzzer/llvm/pass-*.o must NOT be moved
-RUN git clone https://github.com/ivicanikolicsg/SivoFuzzer.git \
- && cd SivoFuzzer \
- && set -x \
- && . ./setup.sh \
+RUN git clone https://github.com/ivicanikolicsg/SivoFuzzer.git /SivoFuzzer \
+ && cd /SivoFuzzer \
+ && source ./setup.sh \
  && cd Sivo-fuzzer \
  && make -j $(nproc) \
  && cd fuzzbench_driver \
