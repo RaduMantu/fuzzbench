@@ -257,7 +257,11 @@ def run_sivo_fuzz(input_corpus,
         raise Exception('At least one of the two binaries are missing')
 
     # if no seed value, create random (sivo needs at least one)
-    if len(os.listdir(input_corpus)) == 0:
+    num_seeds = len(os.listdir(input_corpus))
+    log_msg('input corpus %s%s%s contains %s%s%s seeds' % \
+        (ANSI_YELLOW, input_corpus, ANSI_CLR,
+         ANSI_YELLOW, num_seeds, ANSI_CLR))
+    if num_seeds == 0:
         with open('%s/id:000000' % input_corpus, 'wb') as seed:
             seed.write(os.urandom(512))
         log_msg('Written %s512%s random bytes to %s%s/id:000000%s' % \
@@ -279,6 +283,27 @@ def run_sivo_fuzz(input_corpus,
     # update LD_LIBRARY_PATH with clang_lib/ (may be needed by target)
     env = dict(os.environ)
     env['LD_LIBRARY_PATH'] = '%s/clang_lib' % os.environ['OUT']
+
+    log_msg('LD_LIBRARY_PATH=%s%s%s' % \
+        (ANSI_YELLOW, env['LD_LIBRARY_PATH'], ANSI_CLR))
+
+    # "handle_*=2" sanitizer options are seen as bool and cause the fork
+    # server to crash
+    bool_short_ops = ['abort', 'segv', 'sigbus', 'sigfpe', 'sigill']
+    if 'ASAN_OPTIONS' in env:
+        for bool_short_op in bool_short_ops:
+            env['ASAN_OPTIONS'] = env['ASAN_OPTIONS'].replace(
+                'handle_%s=2' % bool_short_op, 'handle_%s=1' % bool_short_op)
+        log_msg('> %sASAN_OPTIONS%s = %s%s%s' % \
+            (ANSI_YELLOW, ANSI_CLR,
+             ANSI_YELLOW, env['ASAN_OPTIONS'], ANSI_CLR))
+    if 'UBSAN_OPTIONS' in env:
+        for bool_short_op in bool_short_ops:
+            env['UBSAN_OPTIONS'] = env['UBSAN_OPTIONS'].replace(
+                'handle_%s=2' % bool_short_op, 'handle_%s=1' % bool_short_op)
+        log_msg('%sUBSAN_OPTIONS%s = %s%s%s' % \
+            (ANSI_YELLOW, ANSI_CLR,
+             ANSI_YELLOW, env['UBSAN_OPTIONS'], ANSI_CLR))
 
     # start fuzzer
     output_stream = subprocess.DEVNULL if hide_output else None
