@@ -227,13 +227,15 @@ def run_sivo_fuzz(input_corpus,
                   hide_output=False):
     """Start sivo instance.
 
-    Sivo requires a certain corpus structure. If we specify CORPUS as a cli
-    argument, it will expect to find the seed values at this path:
-        CORPUS/init_seeds/queue/
+    Sivo requires a certain directory structure. If we specify WORKSPACE as a
+    cli argument, it will expect to find the seed values at this path:
+        WORKSPACE/init_seeds/queue/
     After successfully starting, it will create a new subdirectory where it
     will store the generated testcases, grouped by different criteria. When
-    evaluating its output, the go-to directory will be:
-        CORPUS/outputs/queue/
+    evaluating its output, the go-to directories will be:
+        WORKSPACE/outputs/{queue,crashes,hangs}
+    We replace the provided output_corpus with a symlink (of the same name) to
+    WORKSPACE/outputs/.
 
     Args:
         input_corpus:  Seed testcases directory.
@@ -256,6 +258,10 @@ def run_sivo_fuzz(input_corpus,
     if not bin1_exists or not bin2_exists:
         raise Exception('At least one of the two binaries are missing')
 
+    # define sivo's workspace dir
+    sivo_workspace = '%s/sivo_workspace' % \
+        pathlib.Path(output_corpus).parent.absolute()
+
     # if no seed value, create random (sivo needs at least one)
     num_seeds = len(os.listdir(input_corpus))
     log_msg('input corpus %s%s%s contains %s%s%s seeds' % \
@@ -268,15 +274,22 @@ def run_sivo_fuzz(input_corpus,
             (ANSI_YELLOW, ANSI_CLR, ANSI_YELLOW, input_corpus, ANSI_CLR))
 
     # create directory structure
-    init_seeds_dir = '%s/init_seeds' % output_corpus
+    init_seeds_dir = '%s/init_seeds' % sivo_workspace
     pathlib.Path(init_seeds_dir).mkdir(parents=True, exist_ok=True)
     os.symlink(input_corpus, '%s/queue' % init_seeds_dir)
 
     log_msg('Created %s%s/queue -> %s%s' % \
         (ANSI_YELLOW, init_seeds_dir, input_corpus, ANSI_CLR))
 
+    # replace output_corpus with a symlink to the intended directory
+    shutil.rmtree(output_corpus)
+    os.symlink('%s/outputs' % sivo_workspace, output_corpus)
+
+    log_msg('Created %s%s -> %s/outputs%s' % \
+        (ANSI_YELLOW, output_corpus, sivo_workspace, ANSI_CLR))
+
     # compose fuzzer command
-    comm = ['./sivo', output_corpus, target_binary, '@@']
+    comm = ['./sivo', sivo_workspace, target_binary, '@@']
     log_msg('Running command: %s%s%s' % \
         (ANSI_YELLOW, ' '.join(comm), ANSI_CLR))
 
@@ -284,11 +297,8 @@ def run_sivo_fuzz(input_corpus,
     env = dict(os.environ)
     env['LD_LIBRARY_PATH'] = '%s/clang_lib' % os.environ['OUT']
 
-    log_msg('LD_LIBRARY_PATH=%s%s%s' % \
-        (ANSI_YELLOW, env['LD_LIBRARY_PATH'], ANSI_CLR))
-
     # "handle_*=2" sanitizer options are seen as bool and cause the fork
-    # server to crash
+    # server to crash; setting them to 1 should not pose a problem
     bool_short_ops = ['abort', 'segv', 'sigbus', 'sigfpe', 'sigill']
     if 'ASAN_OPTIONS' in env:
         for bool_short_op in bool_short_ops:
