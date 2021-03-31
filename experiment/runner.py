@@ -59,6 +59,11 @@ EXCLUDE_PATHS = set([
 
     # QSYM excludes.
     'bitmap',
+
+    # SIVO excludes.
+    'Aux',
+    'queue_full',
+    'tmp_input.txt',
 ])
 
 CORPUS_ELEMENT_BYTES_LIMIT = 1 * 1024 * 1024
