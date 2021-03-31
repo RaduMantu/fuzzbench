@@ -7,3 +7,4 @@ unsupported_fuzzers:
   - aflcc
   - klee
   - lafintel
+  - sivo

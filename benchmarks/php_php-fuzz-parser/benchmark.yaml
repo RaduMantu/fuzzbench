@@ -26,3 +26,4 @@ unsupported_fuzzers:
   - aflplusplus_lto_cmplog
   - aflplusplus_lto_laf
   - aflplusplus_lto_mopt
+  - sivo
